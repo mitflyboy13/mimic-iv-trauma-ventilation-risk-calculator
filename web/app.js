@@ -95,6 +95,12 @@ function readForm() {
     "age",
     "icu_los_days",
     "invasive_vent_duration_hours",
+    "head_neck_ais",
+    "spine_ais",
+    "chest_ais",
+    "abdomen_pelvis_ais",
+    "extremity_ais",
+    "external_burn_ais",
     "gcs_min_24h",
     "sofa_before_liberation",
     "oasis",
@@ -105,12 +111,6 @@ function readForm() {
     "rsbi_proxy_last_6h",
   ];
   const checkbox = [
-    "tbi_flag",
-    "spine_flag",
-    "thoracic_trauma_flag",
-    "abdominal_pelvic_trauma_flag",
-    "extremity_trauma_flag",
-    "burn_flag",
     "vasopressor_any_24h",
     "suspected_infection_flag",
     "sedative_proxy_any_24h",
@@ -130,15 +130,26 @@ function readForm() {
     payload[name] = formData.has(name) ? 1 : 0;
   }
 
-  payload.injury_body_region_count = [
-    "tbi_flag",
-    "spine_flag",
-    "thoracic_trauma_flag",
-    "abdominal_pelvic_trauma_flag",
-    "extremity_trauma_flag",
-    "burn_flag",
-  ].reduce((total, name) => total + payload[name], 0);
+  const aisValues = [
+    payload.head_neck_ais,
+    payload.spine_ais,
+    payload.chest_ais,
+    payload.abdomen_pelvis_ais,
+    payload.extremity_ais,
+    payload.external_burn_ais,
+  ];
+  const sortedAis = [...aisValues].sort((a, b) => b - a);
+  payload.max_ais = sortedAis[0] || 0;
+  payload.iss_proxy = sortedAis.slice(0, 3).reduce((total, value) => total + value * value, 0);
+  payload.injury_body_region_count = aisValues.filter((value) => value > 0).length;
+  payload.severe_ais_region_count = aisValues.filter((value) => value >= 3).length;
   payload.polytrauma_proxy = payload.injury_body_region_count >= 2 ? 1 : 0;
+  payload.tbi_flag = payload.head_neck_ais > 0 ? 1 : 0;
+  payload.spine_flag = payload.spine_ais > 0 ? 1 : 0;
+  payload.thoracic_trauma_flag = payload.chest_ais > 0 ? 1 : 0;
+  payload.abdominal_pelvic_trauma_flag = payload.abdomen_pelvis_ais > 0 ? 1 : 0;
+  payload.extremity_trauma_flag = payload.extremity_ais > 0 ? 1 : 0;
+  payload.burn_flag = payload.external_burn_ais > 0 ? 1 : 0;
 
   return payload;
 }
