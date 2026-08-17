@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: mimic-iv-trauma-ventilation-risk-calculator
+    runtime: docker
+    repo: https://github.com/mitflyboy13/mimic-iv-trauma-ventilation-risk-calculator
+    branch: main
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/csrf
+    envVars:
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: MIMIC_DEMO_USERNAME
+        value: mayo_tcgs_demo
+      - key: MIMIC_DEMO_PASSWORD
+        value: mayo_1234
