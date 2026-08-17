@@ -33,6 +33,8 @@ The ICU ventilatory data source should preferentially point to the PhysioNet cre
 
 The Temporal Respiratory Support dataset is credentialed-access and derived from MIMIC-IV v2.2. Its PhysioNet description states that it includes 50,920 adult ICU patients with 90-day hourly ventilation data, laboratory results, vital signs, and treatment interventions. If you load its per-subject CSV files into BigQuery, use that table as the ventilatory feature backbone and keep the MIMIC-IV hospital/ICU tables for trauma phenotyping and cohort linkage.
 
+The calculator uses AIS body-region scores for injury severity. The MIMIC-only SQL export includes AIS/ISS placeholder columns because native AIS and ISS are not present in structured MIMIC-IV tables. Populate these fields from an external trauma-registry linkage, chart abstraction, or locally validated AIS mapping before model training when available.
+
 The current SQL template remains written against common BigQuery dataset names for MIMIC-IV and MIT-LCP derived concepts:
 
 - `physionet-data.mimiciv_3_1_hosp`
@@ -137,11 +139,11 @@ See `DEPLOYMENT.md`. The short version: GitHub is appropriate for the public sou
 
 ## Literature Extraction Alignment
 
-Your extraction domains are preserved in `config/predictor_dictionary.yaml`. Some paper-level fields, such as citation, recruitment years, or single/multicentre status, are study metadata rather than patient-level MIMIC predictors. Others, such as ISS/AIS, secretion burden, cough strength, diaphragm ultrasound, and formal SAT/SBT pass/fail, are not reliably structured in MIMIC-IV and are marked as unavailable/proxy fields.
+Your extraction domains are preserved in `config/predictor_dictionary.yaml`. Some paper-level fields, such as citation, recruitment years, or single/multicentre status, are study metadata rather than patient-level MIMIC predictors. AIS fields are first-class calculator inputs for trauma severity review, but MIMIC-IV does not natively provide AIS/ISS in structured tables without external trauma-registry linkage. Other fields, such as secretion burden, cough strength, diaphragm ultrasound, and formal SAT/SBT pass/fail, are not reliably structured in MIMIC-IV and are marked as unavailable/proxy fields.
 
 ## Notes
 
 - Trauma identification uses ICD diagnosis code prefixes. Review these rules for your phenotype.
-- MIMIC-IV does not natively provide injury severity scores such as ISS/AIS in structured tables. The tool includes proxies: GCS, SOFA, OASIS, APS III, major trauma subtype flags, and number of injury body-region flags.
+- The calculator now accepts AIS body-region scores directly and derives max AIS, severe-region count, injury-region count, and an ISS-style proxy. The SQL cohort still uses ICD trauma flags for MIMIC-only phenotyping unless AIS/ISS are supplied from an external trauma-registry table.
 - SBT/SAT variables are approximated from ventilator mode and final-hour support settings. Manual validation is recommended.
 - Extubation success is inferred from ventilation episode transitions, not explicit extubation orders.
