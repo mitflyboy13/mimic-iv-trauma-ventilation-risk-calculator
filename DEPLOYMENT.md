@@ -34,7 +34,7 @@ For that reason, use GitHub as the public source repository and deploy the backe
    mayo_1234
    ```
 
-   For platforms that support environment variables at startup, you can seed the demo account without publishing a database file:
+   The app seeds this demo account at startup by default. For platforms that support environment variables at startup, you can override it without publishing a database file:
 
    ```text
    MIMIC_DEMO_USERNAME=mayo_tcgs_demo
