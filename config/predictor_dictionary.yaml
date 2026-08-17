@@ -22,10 +22,12 @@ participants:
     - sofa_before_liberation
     - charlson_comorbidity_index
     - gcs_min_24h
+    - max_ais
+    - iss_proxy
     - injury_body_region_count
   unavailable_structured:
-    - ISS
-    - AIS by body region
+    - native ISS without external trauma-registry linkage
+    - native AIS by body region without external trauma-registry linkage
 ventilator_liberation_outcome:
   default_definition: "No invasive ventilation reinstitution and no death within 48 hours after first qualifying invasive ventilation episode end."
   event_column: "liberation_success_48h"
@@ -38,12 +40,15 @@ timing_and_clinical_decision_context:
     - "6 hours before time origin for final ventilator/ABG/SBT-proxy values"
 clinical_and_injury_predictors:
   extractable_features:
-    - tbi_flag
-    - spine_flag
-    - thoracic_trauma_flag
-    - abdominal_pelvic_trauma_flag
-    - extremity_trauma_flag
-    - burn_flag
+    - head_neck_ais
+    - spine_ais
+    - chest_ais
+    - abdomen_pelvis_ais
+    - extremity_ais
+    - external_burn_ais
+    - max_ais
+    - severe_ais_region_count
+    - iss_proxy
     - polytrauma_proxy
     - vasopressor_any_24h
     - norepinephrine_equivalent_max_24h
