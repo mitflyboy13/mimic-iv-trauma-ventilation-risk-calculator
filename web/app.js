@@ -16,6 +16,12 @@ const modelSource = document.querySelector("#model-source");
 const meterRing = document.querySelector("#meter-ring");
 const riskDetails = document.querySelector("#risk-details");
 
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 async function api(path, options = {}) {
   const headers = {
     "Accept": "application/json",
@@ -23,16 +29,47 @@ async function api(path, options = {}) {
     ...(state.csrfToken ? {"X-CSRF-Token": state.csrfToken} : {}),
     ...(options.headers || {}),
   };
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...options,
-    headers,
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let response;
+    let payload = {};
+    let rawText = "";
+
+    try {
+      response = await fetch(path, {
+        credentials: "same-origin",
+        ...options,
+        headers,
+      });
+    } catch (error) {
+      if (attempt < 2) {
+        await wait(1500 * (attempt + 1));
+        continue;
+      }
+      throw new Error("Network request failed. Please refresh and try again.");
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      payload = await response.json().catch(() => ({}));
+    } else {
+      rawText = await response.text().catch(() => "");
+    }
+
+    if (response.ok) {
+      return payload;
+    }
+
+    if (attempt < 2 && [404, 502, 503, 504].includes(response.status)) {
+      await wait(1500 * (attempt + 1));
+      continue;
+    }
+
+    const fallback = rawText.trim().replace(/\s+/g, " ").slice(0, 140);
+    throw new Error(payload.error || fallback || `Request failed (${response.status})`);
   }
-  return payload;
+
+  throw new Error("Request failed. Please refresh and try again.");
 }
 
 async function refreshCsrf() {
@@ -172,8 +209,8 @@ calculatorForm.addEventListener("submit", async (event) => {
 });
 
 async function boot() {
-  await refreshCsrf();
   try {
+    await refreshCsrf();
     const payload = await api("/api/me");
     showCalculator(payload.user);
   } catch {
