@@ -123,7 +123,8 @@ button:hover {
 }
 
 h1,
-h2 {
+h2,
+h3 {
   margin: 0;
   letter-spacing: 0;
 }
@@ -319,6 +320,50 @@ legend {
   gap: 16px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
+}
+
+.source-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.source-panel h3 {
+  color: var(--accent-dark);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+}
+
+.source-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.source-panel th,
+.source-panel td {
+  padding: 9px 0;
+  border-top: 1px solid #e3ebe8;
+  vertical-align: top;
+}
+
+.source-panel th {
+  width: 42%;
+  color: var(--muted);
+  font-weight: 800;
+  text-align: left;
+}
+
+.source-panel td {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.source-panel a {
+  color: var(--blue);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 dt {
