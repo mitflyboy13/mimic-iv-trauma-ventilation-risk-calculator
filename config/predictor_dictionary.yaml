@@ -1,0 +1,92 @@
+study_and_cohort_identity:
+  mimic_mapping:
+    citation: "MIMIC-IV and MIT-LCP mimic-code should be cited separately in manuscripts."
+    country: "United States"
+    recruitment_years: "MIMIC-IV contains BIDMC hospital/ICU encounters from 2008-2019."
+    design: "Retrospective cohort"
+    trauma_subtype: "ICD diagnosis derived: TBI, spine, thoracic, abdominal/pelvic, extremity, burn, polytrauma proxy."
+    setting: "Single centre, Beth Israel Deaconess Medical Center"
+    cohort_role: "Model-development/internal-validation split by patient."
+participants:
+  extractable_features:
+    - age
+    - sex
+    - race
+    - admission_type
+    - first_careunit
+    - hospital_los_days
+    - icu_los_days
+    - oasis
+    - apsiii
+    - sofa_before_liberation
+    - charlson_comorbidity_index
+    - gcs_min_24h
+    - injury_body_region_count
+  unavailable_structured:
+    - ISS
+    - AIS by body region
+ventilator_liberation_outcome:
+  default_definition: "No invasive ventilation reinstitution and no death within 48 hours after first qualifying invasive ventilation episode end."
+  event_column: "liberation_success_48h"
+  denominator_column: "eligible_liberation_attempt"
+timing_and_clinical_decision_context:
+  time_origin: "End time of first invasive ventilation episode, used as apparent liberation/extubation time."
+  prediction_horizon: "48 hours"
+  measurement_windows:
+    - "24 hours before time origin"
+    - "6 hours before time origin for final ventilator/ABG/SBT-proxy values"
+clinical_and_injury_predictors:
+  extractable_features:
+    - tbi_flag
+    - spine_flag
+    - thoracic_trauma_flag
+    - abdominal_pelvic_trauma_flag
+    - extremity_trauma_flag
+    - burn_flag
+    - polytrauma_proxy
+    - vasopressor_any_24h
+    - norepinephrine_equivalent_max_24h
+    - suspected_infection_flag
+    - antibiotic_any_24h
+    - sedative_proxy_any_24h
+    - opioid_proxy_any_24h
+  unavailable_structured:
+    - secretion burden
+    - cough strength
+arterial_blood_gas_and_oxygenation_predictors:
+  extractable_features:
+    - ph_last_6h
+    - pao2_last_6h
+    - paco2_last_6h
+    - bicarbonate_last_6h
+    - lactate_max_24h
+    - pao2fio2_last_6h
+    - fio2_last_6h
+    - spo2_min_24h
+ventilator_and_respiratory_mechanics_predictors:
+  extractable_features:
+    - peep_last_6h
+    - pressure_support_last_6h
+    - tidal_volume_observed_last_6h
+    - respiratory_rate_set_last_6h
+    - respiratory_rate_total_max_24h
+    - plateau_pressure_last_6h
+    - compliance_proxy_last_6h
+    - driving_pressure_proxy_last_6h
+    - rsbi_proxy_last_6h
+sat_and_sbt_variables:
+  extractable_or_proxy_features:
+    - sbt_mode_proxy
+    - low_support_proxy
+    - final_6h_pressure_support
+    - final_6h_peep
+  unavailable_structured:
+    - formal SAT protocol
+    - formal SBT pass/fail criteria
+    - SBT duration
+other_respiratory_assessments:
+  unavailable_structured:
+    - diaphragm ultrasound
+    - airway patency test
+    - neurologic respiratory drive assessment
+    - cuff leak test
