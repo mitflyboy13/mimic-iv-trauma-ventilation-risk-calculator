@@ -37,6 +37,15 @@ FEATURE_DEFAULTS: dict[str, Any] = {
     "admission_type": "EW EMER.",
     "icu_los_days": 4.0,
     "invasive_vent_duration_hours": 72.0,
+    "head_neck_ais": 0.0,
+    "spine_ais": 0.0,
+    "chest_ais": 2.0,
+    "abdomen_pelvis_ais": 0.0,
+    "extremity_ais": 0.0,
+    "external_burn_ais": 0.0,
+    "max_ais": 2.0,
+    "severe_ais_region_count": 0,
+    "iss_proxy": 4.0,
     "tbi_flag": 0,
     "spine_flag": 0,
     "thoracic_trauma_flag": 1,
@@ -204,7 +213,10 @@ def calculate_heuristic(features: dict[str, Any]) -> float:
     score -= 0.04 * as_int(features, "sedative_proxy_any_24h")
     score -= 0.04 if as_float(features, "sofa_before_liberation") >= 8 else 0
     score -= 0.04 if as_int(features, "polytrauma_proxy") else 0
-    score -= 0.04 if as_int(features, "tbi_flag") and as_float(features, "gcs_min_24h") < 10 else 0
+    score -= 0.03 if as_float(features, "max_ais") >= 3 else 0
+    score -= 0.04 if as_float(features, "max_ais") >= 4 else 0
+    score -= 0.03 * as_int(features, "severe_ais_region_count")
+    score -= 0.04 if as_float(features, "head_neck_ais") >= 3 and as_float(features, "gcs_min_24h") < 10 else 0
     return max(0.05, min(0.95, score))
 
 
@@ -224,6 +236,28 @@ def normalize_features(payload: dict[str, Any]) -> dict[str, Any]:
     for key in FEATURE_DEFAULTS:
         if key in payload:
             features[key] = payload[key]
+
+    ais_keys = [
+        "head_neck_ais",
+        "spine_ais",
+        "chest_ais",
+        "abdomen_pelvis_ais",
+        "extremity_ais",
+        "external_burn_ais",
+    ]
+    ais_values = [max(0.0, min(6.0, as_float(features, key))) for key in ais_keys]
+    for key, value in zip(ais_keys, ais_values):
+        features[key] = value
+    sorted_ais = sorted(ais_values, reverse=True)
+    features["max_ais"] = sorted_ais[0] if sorted_ais else 0.0
+    features["iss_proxy"] = sum(value * value for value in sorted_ais[:3])
+    features["severe_ais_region_count"] = sum(1 for value in ais_values if value >= 3)
+    features["tbi_flag"] = 1 if features["head_neck_ais"] > 0 else as_int(features, "tbi_flag")
+    features["spine_flag"] = 1 if features["spine_ais"] > 0 else as_int(features, "spine_flag")
+    features["thoracic_trauma_flag"] = 1 if features["chest_ais"] > 0 else as_int(features, "thoracic_trauma_flag")
+    features["abdominal_pelvic_trauma_flag"] = 1 if features["abdomen_pelvis_ais"] > 0 else as_int(features, "abdominal_pelvic_trauma_flag")
+    features["extremity_trauma_flag"] = 1 if features["extremity_ais"] > 0 else as_int(features, "extremity_trauma_flag")
+    features["burn_flag"] = 1 if features["external_burn_ais"] > 0 else as_int(features, "burn_flag")
 
     injury_keys = [
         "tbi_flag",
