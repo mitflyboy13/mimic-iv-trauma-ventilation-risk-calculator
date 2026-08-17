@@ -149,8 +149,8 @@ def upsert_user(username: str, password: str, allow_short_password: bool = False
 
 
 def seed_demo_user_from_env() -> None:
-    username = os.environ.get("MIMIC_DEMO_USERNAME")
-    password = os.environ.get("MIMIC_DEMO_PASSWORD")
+    username = os.environ.get("MIMIC_DEMO_USERNAME", "mayo_tcgs_demo")
+    password = os.environ.get("MIMIC_DEMO_PASSWORD", "mayo_1234")
     if username and password:
         upsert_user(username, password, allow_short_password=True)
 
