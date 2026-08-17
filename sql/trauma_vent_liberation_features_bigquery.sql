@@ -6,6 +6,18 @@
 -- Default source datasets follow the public BigQuery naming convention used by
 -- MIMIC-IV and MIT-LCP mimic-code derived concepts. If your release differs,
 -- replace the dataset names below.
+--
+-- Preferred ICU ventilatory data source:
+--   A Temporal Dataset for Respiratory Support in Critically Ill Patients v1.1.0
+--   https://physionet.org/content/temporal-respiratory-support/1.1.0/
+--
+-- That credentialed PhysioNet derivative is built from MIMIC-IV v2.2 and
+-- provides hourly invasive ventilation, non-invasive ventilation, high-flow
+-- nasal cannula, ventilator settings, ABG, vital-sign, vasopressor, CRRT, and
+-- outcome columns. If you have loaded its subject-level CSV files into a local
+-- warehouse table, map the `invasive_vent_events`, `vent_features`, and
+-- `abg_features` CTEs below to that hourly table. The existing MIMIC-IV derived
+-- concept references are kept as a rebuild/fallback path via MIT-LCP mimic-code.
 
 CREATE OR REPLACE TABLE `your_project.your_dataset.trauma_vent_liberation_features` AS
 WITH diagnosis_flags AS (
