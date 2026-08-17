@@ -463,7 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_parser = subparsers.add_parser("serve", help="Start the local web server.")
     serve_parser.add_argument("--host", default="127.0.0.1")
-    serve_parser.add_argument("--port", type=int, default=8000)
+    serve_parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
 
     user_parser = subparsers.add_parser("create-user", help="Create a calculator user.")
     user_parser.add_argument("--username", required=True)
