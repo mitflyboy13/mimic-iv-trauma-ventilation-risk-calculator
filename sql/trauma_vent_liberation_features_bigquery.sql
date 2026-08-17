@@ -18,6 +18,13 @@
 -- warehouse table, map the `invasive_vent_events`, `vent_features`, and
 -- `abg_features` CTEs below to that hourly table. The existing MIMIC-IV derived
 -- concept references are kept as a rebuild/fallback path via MIT-LCP mimic-code.
+--
+-- AIS/ISS note:
+--   MIMIC-IV does not natively contain Abbreviated Injury Scale body-region
+--   scores. This query emits NULL AIS columns in the feature table so they can
+--   be populated by an external trauma registry, chart abstraction, or a local
+--   validated AIS mapping. ICD trauma subtype flags are retained internally for
+--   MIMIC-only cohort phenotyping and backward compatibility.
 
 CREATE OR REPLACE TABLE `your_project.your_dataset.trauma_vent_liberation_features` AS
 WITH diagnosis_flags AS (
@@ -299,6 +306,15 @@ SELECT
     , c.invasive_vent_duration_hours
     , c.next_invasive_vent_starttime
     , c.liberation_success_48h
+    , CAST(NULL AS INT64) AS head_neck_ais
+    , CAST(NULL AS INT64) AS spine_ais
+    , CAST(NULL AS INT64) AS chest_ais
+    , CAST(NULL AS INT64) AS abdomen_pelvis_ais
+    , CAST(NULL AS INT64) AS extremity_ais
+    , CAST(NULL AS INT64) AS external_burn_ais
+    , CAST(NULL AS INT64) AS max_ais
+    , CAST(NULL AS INT64) AS severe_ais_region_count
+    , CAST(NULL AS INT64) AS iss_proxy
     , tr.tbi_flag
     , tr.spine_flag
     , tr.thoracic_trauma_flag
