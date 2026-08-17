@@ -63,13 +63,13 @@
             </fieldset>
 
             <fieldset>
-              <legend>Injury</legend>
-              <label><input name="tbi_flag" type="checkbox"> Traumatic brain injury</label>
-              <label><input name="spine_flag" type="checkbox"> Spine injury</label>
-              <label><input name="thoracic_trauma_flag" type="checkbox" checked> Thoracic trauma</label>
-              <label><input name="abdominal_pelvic_trauma_flag" type="checkbox"> Abdominal/pelvic trauma</label>
-              <label><input name="extremity_trauma_flag" type="checkbox"> Extremity trauma</label>
-              <label><input name="burn_flag" type="checkbox"> Burn injury</label>
+              <legend>AIS Severity</legend>
+              <label>Head/neck AIS <input name="head_neck_ais" type="number" min="0" max="6" step="1" value="0"></label>
+              <label>Spine AIS <input name="spine_ais" type="number" min="0" max="6" step="1" value="0"></label>
+              <label>Chest AIS <input name="chest_ais" type="number" min="0" max="6" step="1" value="2"></label>
+              <label>Abdomen/pelvis AIS <input name="abdomen_pelvis_ais" type="number" min="0" max="6" step="1" value="0"></label>
+              <label>Extremity AIS <input name="extremity_ais" type="number" min="0" max="6" step="1" value="0"></label>
+              <label>External/burn AIS <input name="external_burn_ais" type="number" min="0" max="6" step="1" value="0"></label>
             </fieldset>
 
             <fieldset>
