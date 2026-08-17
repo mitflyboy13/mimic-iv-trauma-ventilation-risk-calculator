@@ -1,12 +1,13 @@
 study_and_cohort_identity:
   mimic_mapping:
-    citation: "MIMIC-IV and MIT-LCP mimic-code should be cited separately in manuscripts."
+    citation: "Cite MIMIC-IV, MIT-LCP mimic-code when concepts are rebuilt, and the PhysioNet Temporal Respiratory Support dataset v1.1.0 when ICU ventilatory time-series data are used."
     country: "United States"
-    recruitment_years: "MIMIC-IV contains BIDMC hospital/ICU encounters from 2008-2019."
+    recruitment_years: "MIMIC-IV contains BIDMC hospital/ICU encounters from 2008-2019; Temporal Respiratory Support is a MIMIC-IV v2.2 derivative spanning 90 days after ICU admission."
     design: "Retrospective cohort"
     trauma_subtype: "ICD diagnosis derived: TBI, spine, thoracic, abdominal/pelvic, extremity, burn, polytrauma proxy."
     setting: "Single centre, Beth Israel Deaconess Medical Center"
     cohort_role: "Model-development/internal-validation split by patient."
+    preferred_ventilatory_dataset: "A Temporal Dataset for Respiratory Support in Critically Ill Patients v1.1.0, https://physionet.org/content/temporal-respiratory-support/1.1.0/"
 participants:
   extractable_features:
     - age
@@ -64,6 +65,7 @@ arterial_blood_gas_and_oxygenation_predictors:
     - fio2_last_6h
     - spo2_min_24h
 ventilator_and_respiratory_mechanics_predictors:
+  preferred_source: "Temporal Respiratory Support hourly CSV/table when available; MIT-LCP mimic-code ventilator_setting concept otherwise."
   extractable_features:
     - peep_last_6h
     - pressure_support_last_6h
