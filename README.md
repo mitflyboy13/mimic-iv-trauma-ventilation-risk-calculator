@@ -23,13 +23,23 @@ This is a research scaffold, not a bedside medical device. Validate cohort defin
 
 ## MIMIC-IV Inputs
 
-The SQL expects access to MIMIC-IV tables and derived concepts. It is written against common BigQuery dataset names:
+The ICU ventilatory data source should preferentially point to the PhysioNet credentialed derivative dataset:
+
+| Source role | Dataset | Link | Use in this project |
+| --- | --- | --- | --- |
+| Preferred ICU ventilatory time series | A Temporal Dataset for Respiratory Support in Critically Ill Patients v1.1.0 | https://physionet.org/content/temporal-respiratory-support/1.1.0/ | Hourly invasive ventilation, non-invasive ventilation, high-flow nasal cannula, ventilator settings, ABG, vital signs, vasopressor, CRRT, and outcome signals derived from MIMIC-IV v2.2. |
+| Parent EHR source | MIMIC-IV | https://physionet.org/content/mimiciv/ | Trauma diagnoses, admissions, ICU stays, medications, and parent table linkage. |
+| Fallback concept source | MIT-LCP mimic-code | https://github.com/MIT-LCP/mimic-code | Rebuild ventilation, ventilator-setting, blood-gas, GCS, SOFA, and demographics concepts when the temporal respiratory-support derivative is not loaded locally. |
+
+The Temporal Respiratory Support dataset is credentialed-access and derived from MIMIC-IV v2.2. Its PhysioNet description states that it includes 50,920 adult ICU patients with 90-day hourly ventilation data, laboratory results, vital signs, and treatment interventions. If you load its per-subject CSV files into BigQuery, use that table as the ventilatory feature backbone and keep the MIMIC-IV hospital/ICU tables for trauma phenotyping and cohort linkage.
+
+The current SQL template remains written against common BigQuery dataset names for MIMIC-IV and MIT-LCP derived concepts:
 
 - `physionet-data.mimiciv_3_1_hosp`
 - `physionet-data.mimiciv_3_1_icu`
 - `physionet-data.mimiciv_3_1_derived`
 
-If your release uses different names, edit the three `DECLARE` statements at the top of the SQL or render a copy with the CLI.
+If your release uses different names, edit the source table references at the top of the SQL or render a copy with the CLI.
 
 The feature backbone follows MIT-LCP `mimic-code` concepts, especially:
 
