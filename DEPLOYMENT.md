@@ -16,6 +16,12 @@ For that reason, use GitHub as the public source repository and deploy the backe
 
 3. Deploy from the GitHub repository to a Python/Docker host.
 
+   On Render, create a Blueprint or Web Service from this repository. The included `render.yaml` configures a Docker web service named:
+
+   ```text
+   mimic-iv-trauma-ventilation-risk-calculator
+   ```
+
 4. Create the demo user on the host:
 
    ```bash
