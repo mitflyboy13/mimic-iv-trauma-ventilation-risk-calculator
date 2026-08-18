@@ -9,6 +9,7 @@ WORKDIR /app
 COPY pyproject.toml requirements.txt ./
 COPY src ./src
 COPY web ./web
+COPY artifacts ./artifacts
 COPY web_server.py ./web_server.py
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
