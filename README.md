@@ -115,7 +115,18 @@ The training workflow writes AUROC/AUPRC/F1 and curve points into `metrics.json`
 }
 ```
 
-The public Render deployment currently uses the research heuristic fallback unless a trained model artifact is deployed. In fallback mode, the calculator displays pending AUROC/AUPRC/F1/SHAP status rather than placeholder performance estimates.
+The public Render deployment is configured to require an actual trained model artifact. If `artifacts/trauma_vent_model.pkl` is not deployed, `/api/calculate` returns a trained-model-required message and the calculator displays pending AUROC/AUPRC/F1/SHAP status rather than placeholder performance estimates. For local UI demos only, set `ALLOW_HEURISTIC_FALLBACK=1` before starting the server.
+
+Train from an analyzable cohort feature table exported from MIMIC-IV and the Temporal Respiratory Support dataset:
+
+```bash
+python3 -m vent_trauma_tool.cli train \
+  --input data/trauma_vent_liberation_features.csv \
+  --model-out artifacts/trauma_vent_model.pkl \
+  --metrics-out artifacts/metrics.json
+```
+
+The CSV/parquet must include the binary target column `liberation_success_48h` and the patient-level predictors used by the calculator. Keep raw MIMIC-IV/PhysioNet data and derived patient rows private under the applicable data-use agreement.
 
 ## Run The App
 
@@ -145,7 +156,7 @@ Then open:
 http://127.0.0.1:8000
 ```
 
-The HTML calculator calls `/api/calculate` after login. If `artifacts/trauma_vent_model.pkl` exists, the server uses that trained model bundle. If no model is available, it uses a clearly labeled research heuristic fallback so the interface can still be reviewed.
+The HTML calculator calls `/api/calculate` after login. If `artifacts/trauma_vent_model.pkl` exists, the server uses that trained model bundle. If no model is available, calculation is blocked by default so the public tool does not present the earlier heuristic as the active model. To review the interface locally without a trained artifact, start the server with `ALLOW_HEURISTIC_FALLBACK=1`.
 
 Login security in this local prototype:
 
