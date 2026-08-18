@@ -145,6 +145,39 @@
             <p class="disclaimer">Research-use prototype only. Do not use for bedside decisions without local validation, calibration review, and institutional approval.</p>
           </aside>
         </section>
+
+        <section class="model-evidence" aria-labelledby="model-evidence-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Model Evidence</p>
+              <h2 id="model-evidence-title">Underlying ML Model & Explainability</h2>
+            </div>
+            <span id="model-training-status" class="status-pill">Loading</span>
+          </div>
+
+          <dl class="model-summary">
+            <div><dt>Model type</dt><dd id="model-type">--</dd></div>
+            <div><dt>Prediction target</dt><dd id="model-target">--</dd></div>
+            <div><dt>AUROC</dt><dd id="model-auroc">--</dd></div>
+            <div><dt>AUPRC</dt><dd id="model-auprc">--</dd></div>
+            <div><dt>F1 score</dt><dd id="model-f1">--</dd></div>
+          </dl>
+
+          <div class="curve-grid">
+            <figure>
+              <figcaption>AUROC curve</figcaption>
+              <div id="roc-curve" class="curve-box"></div>
+            </figure>
+            <figure>
+              <figcaption>AUPRC curve</figcaption>
+              <div id="pr-curve" class="curve-box"></div>
+            </figure>
+            <figure class="shap-panel">
+              <figcaption>SHAP model explanation</figcaption>
+              <div id="shap-summary" class="shap-summary"></div>
+            </figure>
+          </div>
+        </section>
       </section>
     </main>
     <script src="/app.js"></script>
