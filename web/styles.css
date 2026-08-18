@@ -403,6 +403,11 @@ legend {
   background: #fff0d3;
 }
 
+.status-pill.danger {
+  color: #8b2132;
+  background: #ffe2e7;
+}
+
 .model-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
