@@ -95,6 +95,28 @@ python3 -m vent_trauma_tool.cli predict \
 
 The input CSV should contain the same predictor columns as the training export. Identifier columns are passed through when present.
 
+## Model Evidence Artifacts
+
+The authenticated calculator includes a **Model Evidence** section. When a trained model is deployed, it reads:
+
+- `artifacts/trauma_vent_model.pkl` for the scikit-learn prediction pipeline.
+- `artifacts/metrics.json` for AUROC, AUPRC, F1 score, ROC curve points, and precision-recall curve points.
+- `artifacts/shap_summary.json` for SHAP summary values, when available.
+
+The training workflow writes AUROC/AUPRC/F1 and curve points into `metrics.json`. A SHAP artifact can be added after local model interpretation with a schema like:
+
+```json
+{
+  "status": "available",
+  "features": [
+    {"feature": "pao2fio2_last_6h", "mean_abs_shap": 0.18},
+    {"feature": "rsbi_proxy_last_6h", "mean_abs_shap": 0.14}
+  ]
+}
+```
+
+The public Render deployment currently uses the research heuristic fallback unless a trained model artifact is deployed. In fallback mode, the calculator displays pending AUROC/AUPRC/F1/SHAP status rather than placeholder performance estimates.
+
 ## Run The App
 
 ```bash
