@@ -22,13 +22,32 @@ For that reason, use GitHub as the public source repository and deploy the backe
    mimic-iv-trauma-ventilation-risk-calculator
    ```
 
-4. Create the demo user on the host:
+4. Deploy the trained model artifacts produced from the MIMIC-IV/Temporal Respiratory Support training workflow:
+
+   ```text
+   artifacts/trauma_vent_model.pkl
+   artifacts/metrics.json
+   artifacts/shap_summary.json
+   ```
+
+   The public Render config sets `ALLOW_HEURISTIC_FALLBACK=0`, so the calculator will not return predictions until `artifacts/trauma_vent_model.pkl` is present in the running service. Do not publish raw MIMIC-IV rows or other restricted PhysioNet data in the public repository. Review whether a trained artifact can be publicly distributed under your project approvals before committing it; otherwise inject it through a private build/deploy artifact step.
+
+   To train the artifact from a local cohort table:
+
+   ```bash
+   python3 -m vent_trauma_tool.cli train \
+     --input data/trauma_vent_liberation_features.csv \
+     --model-out artifacts/trauma_vent_model.pkl \
+     --metrics-out artifacts/metrics.json
+   ```
+
+5. Create the demo user on the host:
 
    ```bash
    python web_server.py create-user --username mayo_tcgs_demo
    ```
 
-5. Use the demo password only for non-sensitive demonstration access:
+6. Use the demo password only for non-sensitive demonstration access:
 
    ```text
    mayo_1234
