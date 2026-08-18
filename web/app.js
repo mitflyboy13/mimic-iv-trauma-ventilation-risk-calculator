@@ -15,6 +15,15 @@ const riskLabel = document.querySelector("#risk-label");
 const modelSource = document.querySelector("#model-source");
 const meterRing = document.querySelector("#meter-ring");
 const riskDetails = document.querySelector("#risk-details");
+const modelTrainingStatus = document.querySelector("#model-training-status");
+const modelType = document.querySelector("#model-type");
+const modelTarget = document.querySelector("#model-target");
+const modelAuroc = document.querySelector("#model-auroc");
+const modelAuprc = document.querySelector("#model-auprc");
+const modelF1 = document.querySelector("#model-f1");
+const rocCurve = document.querySelector("#roc-curve");
+const prCurve = document.querySelector("#pr-curve");
+const shapSummary = document.querySelector("#shap-summary");
 
 function wait(ms) {
   return new Promise((resolve) => {
@@ -81,6 +90,7 @@ function showCalculator(user) {
   loginView.classList.add("hidden");
   calculatorView.classList.remove("hidden");
   currentUser.textContent = user.username;
+  loadModelCard();
 }
 
 function showLogin() {
@@ -173,6 +183,108 @@ function renderResult(result) {
     <div><dt>Reintubation/reinstitution window</dt><dd>48 hours</dd></div>
     <div><dt>Decision time</dt><dd>Before liberation</dd></div>
   `;
+}
+
+function formatMetric(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "Pending";
+  return Number(value).toFixed(3);
+}
+
+function metricSource(modelCard) {
+  return modelCard?.metrics?.test || modelCard?.metrics || {};
+}
+
+function svgCurve(points, xLabel, yLabel) {
+  if (!points || points.length < 2) {
+    return `<div class="empty-curve">Pending trained-model metrics</div>`;
+  }
+  const width = 280;
+  const height = 180;
+  const pad = 34;
+  const xScale = (x) => pad + Math.max(0, Math.min(1, x)) * (width - 2 * pad);
+  const yScale = (y) => height - pad - Math.max(0, Math.min(1, y)) * (height - 2 * pad);
+  const path = points.map(([x, y], index) => `${index === 0 ? "M" : "L"} ${xScale(x).toFixed(1)} ${yScale(y).toFixed(1)}`).join(" ");
+  return `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${yLabel} by ${xLabel}">
+      <path class="axis" d="M ${pad} ${pad} L ${pad} ${height - pad} L ${width - pad} ${height - pad}"></path>
+      <path class="baseline" d="M ${pad} ${height - pad} L ${width - pad} ${pad}"></path>
+      <path class="curve-line" d="${path}"></path>
+      <text x="${width / 2}" y="${height - 6}" text-anchor="middle">${xLabel}</text>
+      <text x="13" y="${height / 2}" text-anchor="middle" transform="rotate(-90 13 ${height / 2})">${yLabel}</text>
+    </svg>
+  `;
+}
+
+function renderRocCurve(metrics) {
+  const curve = metrics?.roc_curve;
+  const fpr = curve?.false_positive_rate || [];
+  const tpr = curve?.true_positive_rate || [];
+  const points = fpr.map((x, index) => [Number(x), Number(tpr[index])]);
+  rocCurve.innerHTML = svgCurve(points, "False positive rate", "True positive rate");
+}
+
+function renderPrCurve(metrics) {
+  const curve = metrics?.precision_recall_curve;
+  const recall = curve?.recall || [];
+  const precision = curve?.precision || [];
+  const points = recall.map((x, index) => [Number(x), Number(precision[index])]);
+  prCurve.innerHTML = svgCurve(points, "Recall", "Precision");
+}
+
+function renderShap(modelCard) {
+  const shap = modelCard.shap || {};
+  if (Array.isArray(shap.features) && shap.features.length) {
+    const maxValue = Math.max(...shap.features.map((item) => Math.abs(Number(item.mean_abs_shap || 0))), 0.001);
+    shapSummary.innerHTML = shap.features.slice(0, 8).map((item) => {
+      const value = Math.abs(Number(item.mean_abs_shap || 0));
+      const width = Math.max(4, (value / maxValue) * 100);
+      return `
+        <div class="shap-row">
+          <span>${item.feature}</span>
+          <b data-width="${width.toFixed(1)}"></b>
+          <em>${value.toFixed(3)}</em>
+        </div>
+      `;
+    }).join("");
+    shapSummary.querySelectorAll("[data-width]").forEach((bar) => {
+      bar.style.width = `${bar.dataset.width}%`;
+    });
+    return;
+  }
+  const drivers = modelCard.heuristic_drivers || [];
+  if (drivers.length) {
+    shapSummary.innerHTML = `
+      <p>${shap.message}</p>
+      <ul>${drivers.map((item) => `<li><strong>${item.feature}</strong>: ${item.direction}</li>`).join("")}</ul>
+    `;
+    return;
+  }
+  shapSummary.innerHTML = `<p>${shap.message || "SHAP summary is pending trained-model deployment."}</p>`;
+}
+
+function renderModelCard(modelCard) {
+  const metrics = metricSource(modelCard);
+  modelTrainingStatus.textContent = modelCard.deployed_trained_model ? "Trained model deployed" : "Heuristic fallback";
+  modelTrainingStatus.classList.toggle("warning", !modelCard.deployed_trained_model);
+  modelType.textContent = modelCard.model_type || "--";
+  modelTarget.textContent = modelCard.prediction_target || "--";
+  modelAuroc.textContent = formatMetric(metrics.roc_auc);
+  modelAuprc.textContent = formatMetric(metrics.average_precision);
+  modelF1.textContent = formatMetric(metrics.f1_score);
+  renderRocCurve(metrics);
+  renderPrCurve(metrics);
+  renderShap(modelCard);
+}
+
+async function loadModelCard() {
+  try {
+    const modelCard = await api("/api/model-card");
+    renderModelCard(modelCard);
+  } catch (error) {
+    modelTrainingStatus.textContent = "Unavailable";
+    modelType.textContent = "Unable to load model evidence";
+    shapSummary.innerHTML = `<p>${error.message}</p>`;
+  }
 }
 
 loginForm.addEventListener("submit", async (event) => {
