@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 DB_PATH = ROOT / "instance" / "auth.sqlite3"
 MODEL_PATH = ROOT / "artifacts" / "trauma_vent_model.pkl"
+METRICS_PATH = ROOT / "artifacts" / "metrics.json"
+SHAP_PATH = ROOT / "artifacts" / "shap_summary.json"
 SESSION_TTL_SECONDS = 8 * 60 * 60
 PBKDF2_ITERATIONS = 390000
 MAX_JSON_BYTES = 32 * 1024
@@ -199,6 +201,62 @@ def load_model_bundle() -> dict[str, Any] | None:
         return pickle.load(f)
 
 
+def load_json_artifact(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def model_card_payload() -> dict[str, Any]:
+    bundle = load_model_bundle()
+    metrics = load_json_artifact(METRICS_PATH)
+    shap_summary = load_json_artifact(SHAP_PATH)
+    if bundle is not None:
+        metrics = metrics or bundle.get("metrics")
+        pipeline = bundle.get("pipeline")
+        model_type = "Trained scikit-learn logistic regression pipeline"
+        if pipeline is not None:
+            try:
+                model_type = f"Trained {pipeline.named_steps['model'].__class__.__name__} pipeline"
+            except Exception:
+                pass
+        return {
+            "deployed_trained_model": True,
+            "model_type": model_type,
+            "prediction_target": bundle.get("target", "liberation_success_48h"),
+            "feature_count": len(bundle.get("feature_columns", [])),
+            "metrics": metrics,
+            "shap": shap_summary or {
+                "status": "not_available",
+                "message": "SHAP artifact is not deployed. Generate and publish artifacts/shap_summary.json after training on the final cohort.",
+            },
+        }
+
+    return {
+        "deployed_trained_model": False,
+        "model_type": "Rule-based research heuristic fallback",
+        "prediction_target": "48-hour ventilator liberation success",
+        "feature_count": len(FEATURE_DEFAULTS),
+        "metrics": None,
+        "shap": {
+            "status": "not_applicable",
+            "message": "SHAP values are not computed for the deployed heuristic fallback. Train a model on the MIMIC-IV cohort and deploy a SHAP summary artifact for formal explanations.",
+        },
+        "heuristic_drivers": [
+            {"feature": "PaO2/FiO2 >= 200", "direction": "higher success likelihood"},
+            {"feature": "PEEP <= 8", "direction": "higher success likelihood"},
+            {"feature": "FiO2 <= 50%", "direction": "higher success likelihood"},
+            {"feature": "RSBI proxy <= 105", "direction": "higher success likelihood"},
+            {"feature": "Low ventilatory support", "direction": "higher success likelihood"},
+            {"feature": "Higher AIS / severe AIS regions", "direction": "lower success likelihood"},
+            {"feature": "Vasopressor, infection, sedative exposure", "direction": "lower success likelihood"},
+        ],
+    }
+
+
 def calculate_heuristic(features: dict[str, Any]) -> float:
     score = 0.45
     score += 0.16 if as_float(features, "pao2fio2_last_6h") >= 200 else -0.10
@@ -299,6 +357,8 @@ class CalculatorHandler(BaseHTTPRequestHandler):
             self.handle_csrf()
         elif parsed.path == "/api/me":
             self.handle_me()
+        elif parsed.path == "/api/model-card":
+            self.handle_model_card()
         else:
             self.serve_static(parsed.path)
 
@@ -406,6 +466,12 @@ class CalculatorHandler(BaseHTTPRequestHandler):
         if row is None:
             return
         self.send_json(HTTPStatus.OK, {"user": {"username": row["username"]}})
+
+    def handle_model_card(self) -> None:
+        row = self.require_session()
+        if row is None:
+            return
+        self.send_json(HTTPStatus.OK, model_card_payload())
 
     def handle_login(self) -> None:
         try:
