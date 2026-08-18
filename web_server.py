@@ -72,6 +72,18 @@ FEATURE_DEFAULTS: dict[str, Any] = {
 }
 
 
+class ModelUnavailableError(RuntimeError):
+    """Raised when the calculator is configured to require a trained model."""
+
+
+def env_truthy(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def allow_heuristic_fallback() -> bool:
+    return env_truthy("ALLOW_HEURISTIC_FALLBACK", "0")
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -214,6 +226,7 @@ def model_card_payload() -> dict[str, Any]:
     bundle = load_model_bundle()
     metrics = load_json_artifact(METRICS_PATH)
     shap_summary = load_json_artifact(SHAP_PATH)
+    fallback_enabled = allow_heuristic_fallback()
     if bundle is not None:
         metrics = metrics or bundle.get("metrics")
         pipeline = bundle.get("pipeline")
@@ -235,8 +248,28 @@ def model_card_payload() -> dict[str, Any]:
             },
         }
 
+    if not fallback_enabled:
+        return {
+            "deployed_trained_model": False,
+            "model_required": True,
+            "model_type": "Trained MIMIC-IV model artifact required",
+            "prediction_target": "48-hour ventilator liberation success",
+            "feature_count": len(FEATURE_DEFAULTS),
+            "metrics": None,
+            "training_artifacts": [
+                "artifacts/trauma_vent_model.pkl",
+                "artifacts/metrics.json",
+                "artifacts/shap_summary.json",
+            ],
+            "shap": {
+                "status": "pending_trained_model",
+                "message": "No trained model artifact is deployed. Train on the MIMIC-IV Temporal Respiratory Support cohort, publish the model bundle, and add a SHAP summary artifact for formal explanations.",
+            },
+        }
+
     return {
         "deployed_trained_model": False,
+        "model_required": False,
         "model_type": "Rule-based research heuristic fallback",
         "prediction_target": "48-hour ventilator liberation success",
         "feature_count": len(FEATURE_DEFAULTS),
@@ -335,17 +368,19 @@ def calculate_probability(payload: dict[str, Any]) -> tuple[float, str]:
     features = normalize_features(payload)
     bundle = load_model_bundle()
     if bundle is not None:
-        try:
-            import pandas as pd
+        import pandas as pd
 
-            feature_columns = bundle["feature_columns"]
-            row = {column: features.get(column, FEATURE_DEFAULTS.get(column, 0)) for column in feature_columns}
-            frame = pd.DataFrame([row], columns=feature_columns)
-            probability = float(bundle["pipeline"].predict_proba(frame)[:, 1][0])
-            return probability, "Trained MIMIC-IV model bundle"
-        except Exception:
-            pass
-    return calculate_heuristic(features), "Research heuristic fallback"
+        feature_columns = bundle["feature_columns"]
+        row = {column: features.get(column, FEATURE_DEFAULTS.get(column, 0)) for column in feature_columns}
+        frame = pd.DataFrame([row], columns=feature_columns)
+        probability = float(bundle["pipeline"].predict_proba(frame)[:, 1][0])
+        return probability, "Trained MIMIC-IV model bundle"
+    if allow_heuristic_fallback():
+        return calculate_heuristic(features), "Research heuristic fallback"
+    raise ModelUnavailableError(
+        "A trained MIMIC-IV model artifact is required before risk calculation. "
+        "Deploy artifacts/trauma_vent_model.pkl from the dataset training workflow."
+    )
 
 
 class CalculatorHandler(BaseHTTPRequestHandler):
@@ -522,6 +557,14 @@ class CalculatorHandler(BaseHTTPRequestHandler):
                     "liberation_success_probability_48h": probability,
                     "model_source": source,
                     "color": color,
+                },
+            )
+        except ModelUnavailableError as exc:
+            self.send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": str(exc),
+                    "model_required": True,
                 },
             )
         except Exception:
