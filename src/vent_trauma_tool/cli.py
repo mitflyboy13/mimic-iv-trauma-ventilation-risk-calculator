@@ -53,6 +53,7 @@ def main() -> None:
         if "roc_auc" in test_metrics:
             print(f"Test ROC AUC: {test_metrics['roc_auc']:.3f}")
             print(f"Test average precision: {test_metrics['average_precision']:.3f}")
+            print(f"Test F1 score: {test_metrics['f1_score']:.3f}")
 
     if args.command == "predict":
         predictions = predict_table(model_path=args.model, input_path=args.input)
