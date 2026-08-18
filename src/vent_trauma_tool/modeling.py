@@ -17,7 +17,10 @@ from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
     confusion_matrix,
+    f1_score,
+    precision_recall_curve,
     roc_auc_score,
+    roc_curve,
 )
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from sklearn.pipeline import Pipeline
@@ -120,7 +123,10 @@ def _safe_metrics(y_true: pd.Series, y_prob: np.ndarray) -> dict[str, Any]:
         metrics["average_precision"] = float(average_precision_score(y_true, y_prob))
         metrics["brier_score"] = float(brier_score_loss(y_true, y_prob))
         y_pred = (y_prob >= 0.5).astype(int)
+        metrics["f1_score"] = float(f1_score(y_true, y_pred, zero_division=0))
         tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+        fpr, tpr, roc_thresholds = roc_curve(y_true, y_prob)
+        precision, recall, pr_thresholds = precision_recall_curve(y_true, y_prob)
         metrics.update(
             {
                 "threshold": 0.5,
@@ -130,6 +136,16 @@ def _safe_metrics(y_true: pd.Series, y_prob: np.ndarray) -> dict[str, Any]:
                 "true_positive": int(tp),
                 "sensitivity": float(tp / (tp + fn)) if (tp + fn) else None,
                 "specificity": float(tn / (tn + fp)) if (tn + fp) else None,
+                "roc_curve": {
+                    "false_positive_rate": _round_series(fpr),
+                    "true_positive_rate": _round_series(tpr),
+                    "thresholds": _round_series(roc_thresholds),
+                },
+                "precision_recall_curve": {
+                    "precision": _round_series(precision),
+                    "recall": _round_series(recall),
+                    "thresholds": _round_series(pr_thresholds),
+                },
             }
         )
     else:
@@ -224,3 +240,17 @@ def _json_dumps(payload: dict[str, Any]) -> str:
     import json
 
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _round_series(values: np.ndarray) -> list[float | str]:
+    output: list[float | str] = []
+    for value in values:
+        if np.isposinf(value):
+            output.append("Infinity")
+        elif np.isneginf(value):
+            output.append("-Infinity")
+        elif np.isnan(value):
+            output.append("NaN")
+        else:
+            output.append(round(float(value), 6))
+    return output
