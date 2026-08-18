@@ -69,7 +69,7 @@ async function api(path, options = {}) {
       return payload;
     }
 
-    if (attempt < 2 && [404, 502, 503, 504].includes(response.status)) {
+    if (attempt < 2 && [404, 502, 503, 504].includes(response.status) && !payload.model_required) {
       await wait(1500 * (attempt + 1));
       continue;
     }
@@ -251,6 +251,14 @@ function renderShap(modelCard) {
     });
     return;
   }
+  const artifacts = modelCard.training_artifacts || [];
+  if (artifacts.length) {
+    shapSummary.innerHTML = `
+      <p>${shap.message}</p>
+      <ul>${artifacts.map((item) => `<li>${item}</li>`).join("")}</ul>
+    `;
+    return;
+  }
   const drivers = modelCard.heuristic_drivers || [];
   if (drivers.length) {
     shapSummary.innerHTML = `
@@ -264,8 +272,15 @@ function renderShap(modelCard) {
 
 function renderModelCard(modelCard) {
   const metrics = metricSource(modelCard);
-  modelTrainingStatus.textContent = modelCard.deployed_trained_model ? "Trained model deployed" : "Heuristic fallback";
+  if (modelCard.deployed_trained_model) {
+    modelTrainingStatus.textContent = "Trained model deployed";
+  } else if (modelCard.model_required) {
+    modelTrainingStatus.textContent = "Trained model required";
+  } else {
+    modelTrainingStatus.textContent = "Heuristic fallback";
+  }
   modelTrainingStatus.classList.toggle("warning", !modelCard.deployed_trained_model);
+  modelTrainingStatus.classList.toggle("danger", Boolean(modelCard.model_required));
   modelType.textContent = modelCard.model_type || "--";
   modelTarget.textContent = modelCard.prediction_target || "--";
   modelAuroc.textContent = formatMetric(metrics.roc_auc);
