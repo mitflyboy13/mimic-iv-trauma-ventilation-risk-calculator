@@ -11,7 +11,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
-import pickle
+import logging
 import secrets
 import sqlite3
 import sys
@@ -21,6 +21,8 @@ from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Any
 from urllib.parse import unquote, urlparse
+
+from vent_trauma_tool.deployment import ArtifactError, load_artifacts, probability as model_probability
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
@@ -206,26 +208,33 @@ def make_clear_cookie(name: str) -> str:
     return cookie.output(header="").strip()
 
 
-def load_model_bundle() -> dict[str, Any] | None:
-    if not MODEL_PATH.exists():
-        return None
-    with MODEL_PATH.open("rb") as f:
-        return pickle.load(f)
+_MODEL = None
+_METRICS = None
+_SHAP = None
 
 
-def load_json_artifact(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
+def initialize_model() -> bool:
+    global _MODEL, _METRICS, _SHAP
+    _MODEL = _METRICS = _SHAP = None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+        _MODEL, _METRICS, _SHAP = load_artifacts(
+            normalize_features({}), Path(os.environ.get("ARTIFACT_DIR", str(ROOT / "artifacts")))
+        )
+    except ArtifactError as exc:
+        logging.error("MODEL_UNAVAILABLE: %s Predictions are disabled unless explicitly running a heuristic demo.", exc)
+        return False
+    logging.warning("MODEL_READY: artifact integrity/compatibility checks passed; this is not clinical validation.")
+    return True
+
+
+def load_model_bundle() -> dict[str, Any] | None:
+    return _MODEL
 
 
 def model_card_payload() -> dict[str, Any]:
     bundle = load_model_bundle()
-    metrics = load_json_artifact(METRICS_PATH)
-    shap_summary = load_json_artifact(SHAP_PATH)
+    metrics = _METRICS
+    shap_summary = _SHAP
     fallback_enabled = allow_heuristic_fallback()
     if bundle is not None:
         metrics = metrics or bundle.get("metrics")
@@ -368,12 +377,11 @@ def calculate_probability(payload: dict[str, Any]) -> tuple[float, str]:
     features = normalize_features(payload)
     bundle = load_model_bundle()
     if bundle is not None:
-        import pandas as pd
-
-        feature_columns = bundle["feature_columns"]
-        row = {column: features.get(column, FEATURE_DEFAULTS.get(column, 0)) for column in feature_columns}
-        frame = pd.DataFrame([row], columns=feature_columns)
-        probability = float(bundle["pipeline"].predict_proba(frame)[:, 1][0])
+        try:
+            probability = model_probability(bundle, features)
+        except Exception:
+            logging.error("MODEL_INFERENCE_FAILED: check model compatibility and input values.")
+            raise ModelUnavailableError("The trained model is unable to calculate risk.") from None
         return probability, "Trained MIMIC-IV model bundle"
     if allow_heuristic_fallback():
         return calculate_heuristic(features), "Research heuristic fallback"
@@ -388,7 +396,9 @@ class CalculatorHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/api/csrf":
+        if parsed.path == "/api/ready":
+            self.send_json(HTTPStatus.OK if _MODEL is not None else HTTPStatus.SERVICE_UNAVAILABLE, {"model_ready": _MODEL is not None})
+        elif parsed.path == "/api/csrf":
             self.handle_csrf()
         elif parsed.path == "/api/me":
             self.handle_me()
@@ -592,6 +602,7 @@ class CalculatorHandler(BaseHTTPRequestHandler):
 
 
 def serve(host: str, port: int) -> None:
+    initialize_model()
     init_db()
     seed_demo_user_from_env()
     delete_expired_sessions()

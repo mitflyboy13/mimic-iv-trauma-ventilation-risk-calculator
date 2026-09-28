@@ -180,3 +180,13 @@ Your extraction domains are preserved in `config/predictor_dictionary.yaml`. Som
 - The calculator now accepts AIS body-region scores directly and derives max AIS, severe-region count, injury-region count, and an ISS-style proxy. The SQL cohort still uses ICD trauma flags for MIMIC-only phenotyping unless AIS/ISS are supplied from an external trauma-registry table.
 - SBT/SAT variables are approximated from ventilator mode and final-hour support settings. Manual validation is recommended.
 - Extubation success is inferred from ventilation episode transitions, not explicit extubation orders.
+
+
+### Supplying a private trained model
+
+See [private artifact delivery](DEPLOYMENT.md#private-artifact-delivery-on-render)
+for runtime HTTPS injection of `trauma_vent_model.pkl`, matching `metrics.json`,
+and optional `shap_summary.json`, with SHA-256 checks before deserialization.
+Never commit these files or restricted MIMIC-IV/PhysioNet data. `/api/ready`
+returns 503 until startup validates the complete release. The delivery hook does
+not provide a trained artifact or establish model performance.

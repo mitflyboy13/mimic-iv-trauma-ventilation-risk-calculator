@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+data
+artifacts
+instance
+*.pkl
+*.pickle
+*.joblib
+*.csv
+*.parquet
+.env*
+metrics.json
+shap_summary.json

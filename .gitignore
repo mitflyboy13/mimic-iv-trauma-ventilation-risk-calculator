@@ -9,3 +9,9 @@ data/*
 artifacts/*
 !artifacts/.gitkeep
 instance/
+*.pkl
+*.pickle
+*.joblib
+.env*
+metrics.json
+shap_summary.json
