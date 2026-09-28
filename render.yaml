@@ -6,7 +6,7 @@ services:
     branch: main
     dockerfilePath: ./Dockerfile
     plan: free
-    healthCheckPath: /api/csrf
+    healthCheckPath: /api/ready
     envVars:
       - key: COOKIE_SECURE
         value: "1"
