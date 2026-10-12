@@ -8,6 +8,7 @@
   </head>
   <body>
     <main class="app-shell">
+      <p id="demo-notice" class="form-error hidden" role="status">DEMONSTRATION ONLY — illustrative heuristic, no trained model. Use fictitious inputs only; not for clinical decisions.</p>
       <section id="login-view" class="auth-panel" aria-labelledby="login-title">
         <div class="brand-strip">
           <div class="wave-card" aria-hidden="true">
@@ -24,11 +25,11 @@
         <form id="login-form" class="login-form">
           <label>
             Username
-            <input name="username" autocomplete="username" required>
+            <input name="username" autocomplete="username" maxlength="128" required>
           </label>
           <label>
             Password
-            <input name="password" type="password" autocomplete="current-password" required>
+            <input name="password" type="password" autocomplete="current-password" maxlength="128" required>
           </label>
           <button type="submit">Sign in</button>
           <p id="login-error" class="form-error" role="alert"></p>

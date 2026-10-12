@@ -19,7 +19,7 @@ This is a research scaffold, not a bedside medical device. Validate cohort defin
 - `app/streamlit_app.py`: lightweight single-patient prediction interface.
 - `web/` and `web_server.py`: authenticated HTML calculator called **MIMIC IV Trauma Ventilation Risk Calculator Tool**.
 - `Dockerfile` and `DEPLOYMENT.md`: public GitHub/backend deployment support.
-- `tests/`: smoke tests using synthetic data.
+- `tests/`: authentication and deployment regression tests; a separate synthetic training smoke test.
 
 ## MIMIC-IV Inputs
 
@@ -115,7 +115,7 @@ The training workflow writes AUROC/AUPRC/F1 and curve points into `metrics.json`
 }
 ```
 
-The public Render deployment is configured to require an actual trained model artifact. If `artifacts/trauma_vent_model.pkl` is not deployed, `/api/calculate` returns a trained-model-required message and the calculator displays pending AUROC/AUPRC/F1/SHAP status rather than placeholder performance estimates. For local UI demos only, set `ALLOW_HEURISTIC_FALLBACK=1` before starting the server.
+The public Render deployment is configured to require an actual trained model artifact. If `artifacts/trauma_vent_model.pkl` is not deployed, `/api/calculate` returns a trained-model-required message and the calculator displays pending AUROC/AUPRC/F1/SHAP status rather than placeholder performance estimates. For a UI-only demonstration, explicitly configure isolated demo mode as described in [DEPLOYMENT.md](DEPLOYMENT.md#local-development-and-intentional-demo).
 
 Train from an analyzable cohort feature table exported from MIMIC-IV and the Temporal Respiratory Support dataset:
 
@@ -147,7 +147,7 @@ python3 web_server.py create-user --username reviewer
 Start the server:
 
 ```bash
-python3 web_server.py serve --host 127.0.0.1 --port 8000
+python3 web_server.py serve --host 127.0.0.1 --port 8000 --insecure-local-http
 ```
 
 Then open:
@@ -156,15 +156,18 @@ Then open:
 http://127.0.0.1:8000
 ```
 
-The HTML calculator calls `/api/calculate` after login. If `artifacts/trauma_vent_model.pkl` exists, the server uses that trained model bundle. If no model is available, calculation is blocked by default so the public tool does not present the earlier heuristic as the active model. To review the interface locally without a trained artifact, start the server with `ALLOW_HEURISTIC_FALLBACK=1`.
+The HTML calculator calls `/api/calculate` after login. If `artifacts/trauma_vent_model.pkl` exists, the server uses that trained model bundle. If no model is available, calculation is blocked by default so the public tool does not present the earlier heuristic as the active model. To review the interface without a trained artifact, use a separate, explicitly configured `MIMIC_AUTH_MODE=demo` instance with strong demo credentials and `ALLOW_HEURISTIC_FALLBACK=1`. Demo mode rejects artifact settings/files and cannot access private model cards.
 
-Login security in this local prototype:
+Authentication defaults:
 
-- Passwords are salted and hashed with PBKDF2-SHA256.
-- Sessions are stored server-side in SQLite and sent as HttpOnly, SameSite cookies.
-- State-changing API calls require a CSRF token.
-- Patient calculator inputs are not persisted by default.
-- Set `COOKIE_SECURE=1` when serving behind HTTPS.
+- There are no built-in accounts or passwords. Startup requires securely configured bootstrap credentials or an eligible pre-provisioned account.
+- All accounts, including demos, require 15–128 character passwords, stored with salted PBKDF2-HMAC-SHA256 (600,000 iterations).
+- Hosted services require `PUBLIC_ORIGIN` and secure cookies behind HTTPS. HTTP is an explicit loopback-only development exception.
+- Sessions are server-side, rotate on login, expire after eight hours, and are revoked on logout, password reset, and restart. State-changing authenticated calls require CSRF tokens; logins are rate limited.
+- Existing accounts from the previous schema require explicit `reset-user` migration; old demonstration access is not retained.
+- Patient calculator inputs are not persisted by this backend.
+
+See [configuration, secret management, and migration](DEPLOYMENT.md) before upgrading a service. This authentication applies to `web_server.py`, not the separate Streamlit or training CLI.
 
 ## Public GitHub Deployment
 

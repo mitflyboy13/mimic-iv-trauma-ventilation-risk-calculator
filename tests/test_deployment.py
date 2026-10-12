@@ -154,13 +154,13 @@ class DeliveryTests(unittest.TestCase):
         # Exercise real login, CSRF, readiness, calculate and model-card endpoints.
         with patch.object(web, 'DB_PATH', self.path / 'auth.sqlite3'), patch.dict('os.environ', {'COOKIE_SECURE': '0', 'ALLOW_HEURISTIC_FALLBACK': '0'}), patch.object(web, '_MODEL', None):
             web.init_db()
-            web.upsert_user('smoke', 'test-only-password')
+            web.create_user('smoke', 'test-only-password')
             server = web.ThreadingHTTPServer(('127.0.0.1', 0), web.CalculatorHandler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             conn = HTTPConnection(*server.server_address)
             def request(method, path, data=None, headers=None):
-                conn.request(method, path, json.dumps(data) if data is not None else None, headers or {})
+                conn.request(method, path, json.dumps(data) if data is not None else None, {'Content-Type': 'application/json', **(headers or {})})
                 response = conn.getresponse()
                 return response.status, dict(response.getheaders()), json.loads(response.read())
             try:

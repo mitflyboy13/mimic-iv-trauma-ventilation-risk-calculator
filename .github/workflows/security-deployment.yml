@@ -1,0 +1,28 @@
+name: Authentication and deployment regression
+
+on:
+  push:
+    branches: [main, secure-artifact-injection, secure-authentication-defaults]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[test]' bandit
+      - name: Auth and private delivery (no training or real artifacts)
+        run: python -m pytest tests/test_auth.py tests/test_deployment.py -q
+      - run: python -m compileall -q web_server.py src tests
+      - run: node --check web/app.js
+      - run: git diff --check
+      - name: Authentication backend static security check
+        run: bandit web_server.py

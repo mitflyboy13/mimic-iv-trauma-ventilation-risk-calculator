@@ -25,6 +25,12 @@ const rocCurve = document.querySelector("#roc-curve");
 const prCurve = document.querySelector("#pr-curve");
 const shapSummary = document.querySelector("#shap-summary");
 
+function escapeHtml(value) {
+  const span = document.createElement("span");
+  span.textContent = String(value ?? "");
+  return span.innerHTML;
+}
+
 function wait(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -94,6 +100,14 @@ function showCalculator(user) {
 }
 
 function showLogin() {
+  state.csrfToken = "";
+  renderModelCard({shap: {}});
+  riskPercent.textContent = "--";
+  riskLabel.textContent = "Awaiting calculation";
+  modelSource.textContent = "";
+  riskDetails.replaceChildren();
+  meterRing.style.background = "";
+  calculatorForm.reset();
   calculatorView.classList.add("hidden");
   loginView.classList.remove("hidden");
   currentUser.textContent = "";
@@ -240,7 +254,7 @@ function renderShap(modelCard) {
       const width = Math.max(4, (value / maxValue) * 100);
       return `
         <div class="shap-row">
-          <span>${item.feature}</span>
+          <span>${escapeHtml(item.feature)}</span>
           <b data-width="${width.toFixed(1)}"></b>
           <em>${value.toFixed(3)}</em>
         </div>
@@ -254,20 +268,20 @@ function renderShap(modelCard) {
   const artifacts = modelCard.training_artifacts || [];
   if (artifacts.length) {
     shapSummary.innerHTML = `
-      <p>${shap.message}</p>
-      <ul>${artifacts.map((item) => `<li>${item}</li>`).join("")}</ul>
+      <p>${escapeHtml(shap.message)}</p>
+      <ul>${artifacts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
     `;
     return;
   }
   const drivers = modelCard.heuristic_drivers || [];
   if (drivers.length) {
     shapSummary.innerHTML = `
-      <p>${shap.message}</p>
-      <ul>${drivers.map((item) => `<li><strong>${item.feature}</strong>: ${item.direction}</li>`).join("")}</ul>
+      <p>${escapeHtml(shap.message)}</p>
+      <ul>${drivers.map((item) => `<li><strong>${escapeHtml(item.feature)}</strong>: ${escapeHtml(item.direction)}</li>`).join("")}</ul>
     `;
     return;
   }
-  shapSummary.innerHTML = `<p>${shap.message || "SHAP summary is pending trained-model deployment."}</p>`;
+  shapSummary.innerHTML = `<p>${escapeHtml(shap.message || "SHAP summary is pending trained-model deployment.")}</p>`;
 }
 
 function renderModelCard(modelCard) {
@@ -298,7 +312,7 @@ async function loadModelCard() {
   } catch (error) {
     modelTrainingStatus.textContent = "Unavailable";
     modelType.textContent = "Unable to load model evidence";
-    shapSummary.innerHTML = `<p>${error.message}</p>`;
+    shapSummary.textContent = error.message;
   }
 }
 
@@ -348,6 +362,8 @@ calculatorForm.addEventListener("submit", async (event) => {
 
 async function boot() {
   try {
+    const config = await api("/api/config");
+    document.querySelector("#demo-notice").classList.toggle("hidden", !config.demo_mode);
     await refreshCsrf();
     const payload = await api("/api/me");
     showCalculator(payload.user);

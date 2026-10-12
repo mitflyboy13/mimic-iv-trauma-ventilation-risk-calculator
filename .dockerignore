@@ -13,3 +13,6 @@ instance
 .env*
 metrics.json
 shap_summary.json
+
+secrets
+*.egg-info

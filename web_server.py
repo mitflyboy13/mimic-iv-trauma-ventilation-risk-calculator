@@ -14,25 +14,107 @@ from pathlib import Path
 import logging
 import secrets
 import sqlite3
-import sys
 import time
+from dataclasses import dataclass
+from contextlib import contextmanager
 from http import HTTPStatus
-from http.cookies import SimpleCookie
+from http.cookies import CookieError, SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import unquote, urlparse
 
 from vent_trauma_tool.deployment import ArtifactError, load_artifacts, probability as model_probability
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-DB_PATH = ROOT / "instance" / "auth.sqlite3"
+DB_PATH = Path(os.environ.get("AUTH_DB_PATH", str(ROOT / "instance" / "auth.sqlite3")))
 MODEL_PATH = ROOT / "artifacts" / "trauma_vent_model.pkl"
 METRICS_PATH = ROOT / "artifacts" / "metrics.json"
 SHAP_PATH = ROOT / "artifacts" / "shap_summary.json"
 SESSION_TTL_SECONDS = 8 * 60 * 60
-PBKDF2_ITERATIONS = 390000
+PBKDF2_ITERATIONS = 600000
 MAX_JSON_BYTES = 32 * 1024
+PASSWORD_POLICY_VERSION = 1
+LOGIN_WINDOW_SECONDS = 5 * 60
+
+
+class AuthConfigurationError(ValueError):
+    """Safe configuration error: never includes a credential or secret path."""
+
+
+@dataclass(frozen=True)
+class AuthConfig:
+    mode: str = "restricted"
+    cookie_secure: bool = True
+    origin: str = ""
+
+
+_AUTH_CONFIG = AuthConfig()
+
+
+def configured_bool(name: str, default: str) -> bool:
+    value = os.environ.get(name, default)
+    if value not in {"0", "1"}:
+        raise AuthConfigurationError(f"{name} must be 0 or 1.")
+    return value == "1"
+
+
+def password_secret(name: str) -> str:
+    """Accept a host-managed environment secret OR a mounted secret file."""
+    value, filename = os.environ.get(name), os.environ.get(name + "_FILE")
+    if value is not None and filename is not None:
+        raise AuthConfigurationError(f"Set only {name} or {name}_FILE.")
+    if filename is not None:
+        try:
+            with Path(filename).open("rb") as stream:
+                raw = stream.read(4097)
+            if len(raw) > 4096:
+                raise ValueError()
+            value = raw.decode("utf-8").removesuffix("\n").removesuffix("\r")
+        except (OSError, ValueError):
+            raise AuthConfigurationError(f"Unable to read {name}_FILE.") from None
+    if value is not None and not value:
+        raise AuthConfigurationError(f"{name} must not be empty.")
+    return value or ""
+
+
+def read_auth_config(host: str, port: int, insecure_local_http: bool = False) -> AuthConfig:
+    mode = os.environ.get("MIMIC_AUTH_MODE", "restricted")
+    if mode not in {"restricted", "demo"}:
+        raise AuthConfigurationError("MIMIC_AUTH_MODE must be restricted or demo.")
+    if insecure_local_http and host != "127.0.0.1":
+        raise AuthConfigurationError("--insecure-local-http requires --host 127.0.0.1.")
+    secure = configured_bool("COOKIE_SECURE", "0" if insecure_local_http else "1")
+    if not secure and not insecure_local_http:
+        raise AuthConfigurationError("COOKIE_SECURE=0 requires --insecure-local-http on loopback.")
+    origin = os.environ.get("PUBLIC_ORIGIN", f"http://127.0.0.1:{port}" if insecure_local_http else "")
+    try:
+        parts = urlparse(origin)
+        parts.port  # Validate a supplied port without logging the origin value.
+    except ValueError:
+        raise AuthConfigurationError("PUBLIC_ORIGIN is not a valid origin.") from None
+    if (not parts.hostname or parts.username or parts.password or parts.path or parts.params
+            or parts.query or parts.fragment or parts.scheme not in {"https", "http"}
+            or origin != f"{parts.scheme}://{parts.netloc}" or any(c.isspace() for c in origin)):
+        raise AuthConfigurationError("PUBLIC_ORIGIN must be an exact origin without a path (HTTPS for deployment).")
+    if parts.scheme != "https" and not (insecure_local_http and parts.hostname in {"127.0.0.1", "localhost"}):
+        raise AuthConfigurationError("PUBLIC_ORIGIN must use HTTPS outside local loopback development.")
+    if secure and parts.scheme != "https":
+        raise AuthConfigurationError("HTTP local development requires COOKIE_SECURE=0.")
+    fallback = configured_bool("ALLOW_HEURISTIC_FALLBACK", "0")
+    incompatible = "MIMIC_DEMO_" if mode == "restricted" else "MIMIC_BOOTSTRAP_"
+    if any(key.startswith(incompatible) for key in os.environ):
+        raise AuthConfigurationError(f"Remove {incompatible} settings in {mode} mode.")
+    if mode == "restricted" and fallback:
+        raise AuthConfigurationError("Heuristic predictions require explicit MIMIC_AUTH_MODE=demo.")
+    if mode == "demo":
+        if not fallback:
+            raise AuthConfigurationError("Demo mode requires ALLOW_HEURISTIC_FALLBACK=1.")
+        if any(key.startswith("ARTIFACT_") for key in os.environ) or any(
+            path.exists() for path in (MODEL_PATH, METRICS_PATH, SHAP_PATH)
+        ):
+            raise AuthConfigurationError("Demo mode cannot use artifact settings or local model artifacts. Use a separate clean instance.")
+    return AuthConfig(mode, secure, origin)
 
 FEATURE_DEFAULTS: dict[str, Any] = {
     "age": 55.0,
@@ -78,19 +160,21 @@ class ModelUnavailableError(RuntimeError):
     """Raised when the calculator is configured to require a trained model."""
 
 
-def env_truthy(name: str, default: str = "0") -> bool:
-    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def allow_heuristic_fallback() -> bool:
-    return env_truthy("ALLOW_HEURISTIC_FALLBACK", "0")
+    return _AUTH_CONFIG.mode == "demo"
 
 
-def connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+@contextmanager
+def connect() -> Iterator[sqlite3.Connection]:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     conn = sqlite3.connect(DB_PATH)
+    DB_PATH.chmod(0o600)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -118,6 +202,15 @@ def init_db() -> None:
             )
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+        if "account_type" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'restricted'")
+        if "password_policy" not in columns:
+            # Old hashes cannot establish password strength. Require explicit reset.
+            conn.execute("ALTER TABLE users ADD COLUMN password_policy INTEGER NOT NULL DEFAULT 0")
+        conn.execute("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE password_policy != ?)",
+                     (PASSWORD_POLICY_VERSION,))
+        conn.execute("CREATE TABLE IF NOT EXISTS login_limits (bucket TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires_at INTEGER NOT NULL)")
 
 
 def hash_password(password: str, salt: bytes | None = None) -> str:
@@ -147,37 +240,95 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_user(username: str, password: str) -> None:
-    if len(password) < 12:
-        raise ValueError("Password must be at least 12 characters.")
+def validate_credentials(username: str, password: str) -> None:
+    if not username or username != username.strip() or len(username) > 128 or any(ord(c) < 32 for c in username):
+        raise ValueError("Username must contain 1–128 characters without surrounding whitespace or controls.")
+    if not 15 <= len(password) <= 128:
+        raise ValueError("Password must contain 15–128 characters.")
+    # Small local blocklist; operators should use unique password-manager secrets.
+    blocked = {"password123456789", "123456789012345", "1234567890123456",
+               "qwertyuiopasdfgh", "correct horse battery staple"}
+    if (not password.strip() or len(set(password)) == 1
+            or password.casefold() == username.casefold() or password.casefold() in blocked):
+        raise ValueError("Choose a unique password, not a common, repeated, or username-based password.")
+
+
+def create_user(username: str, password: str, account_type: str = "restricted") -> None:
+    validate_credentials(username, password)
+    if account_type not in {"restricted", "demo"}:
+        raise ValueError("Invalid account type.")
     init_db()
     with connect() as conn:
         conn.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, hash_password(password), int(time.time())),
+            "INSERT INTO users (username, password_hash, created_at, account_type, password_policy) VALUES (?, ?, ?, ?, ?)",
+            (username, hash_password(password), int(time.time()), account_type, PASSWORD_POLICY_VERSION),
         )
 
 
-def upsert_user(username: str, password: str, allow_short_password: bool = False) -> None:
-    if not allow_short_password and len(password) < 12:
-        raise ValueError("Password must be at least 12 characters.")
+def reset_user(username: str, password: str, account_type: str = "restricted") -> None:
+    """Explicit operator rotation, never an implicit startup password overwrite."""
+    validate_credentials(username, password)
+    if account_type not in {"restricted", "demo"}:
+        raise ValueError("Invalid account type.")
     init_db()
     with connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO users (username, password_hash, created_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash
-            """,
-            (username, hash_password(password), int(time.time())),
+        changed = conn.execute(
+            "UPDATE users SET password_hash = ?, account_type = ?, password_policy = ? WHERE username = ?",
+            (hash_password(password), account_type, PASSWORD_POLICY_VERSION, username),
         )
+        if not changed.rowcount:
+            raise ValueError("Account does not exist; use create-user.")
+        conn.execute("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)", (username,))
 
 
-def seed_demo_user_from_env() -> None:
-    username = os.environ.get("MIMIC_DEMO_USERNAME", "mayo_tcgs_demo")
-    password = os.environ.get("MIMIC_DEMO_PASSWORD", "mayo_1234")
-    if username and password:
-        upsert_user(username, password, allow_short_password=True)
+def initialize_auth(host: str, port: int, insecure_local_http: bool = False) -> None:
+    global _AUTH_CONFIG
+    config = read_auth_config(host, port, insecure_local_http)
+    prefix = "MIMIC_DEMO" if config.mode == "demo" else "MIMIC_BOOTSTRAP"
+    username = os.environ.get(prefix + "_USERNAME", "")
+    password = password_secret(prefix + "_PASSWORD")
+    if bool(username) != bool(password) or (config.mode == "demo" and not username):
+        raise AuthConfigurationError(f"Set both {prefix}_USERNAME and {prefix}_PASSWORD (or its _FILE variant).")
+    if username:
+        validate_credentials(username, password)
+    init_db()
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if username:
+            existing = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            if existing:
+                if (existing["account_type"] != config.mode or existing["password_policy"] != PASSWORD_POLICY_VERSION
+                        or not verify_password(password, existing["password_hash"])):
+                    raise AuthConfigurationError("Configured account differs from the stored account or needs migration; use reset-user explicitly.")
+            else:
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, created_at, account_type, password_policy) VALUES (?, ?, ?, ?, ?)",
+                    (username, hash_password(password), int(time.time()), config.mode, PASSWORD_POLICY_VERSION),
+                )
+        active = conn.execute("SELECT 1 FROM users WHERE account_type = ? AND password_policy = ? LIMIT 1",
+                              (config.mode, PASSWORD_POLICY_VERSION)).fetchone()
+        if not active:
+            raise AuthConfigurationError("No eligible account. Configure bootstrap credentials or use create-user/reset-user.")
+        # A restart, particularly a mode switch, always requires a fresh login.
+        conn.execute("DELETE FROM sessions")
+    _AUTH_CONFIG = config
+
+
+def consume_login_attempt(username: str) -> bool:
+    """Fixed-window per-name and service limits; no proxy headers are trusted."""
+    now = int(time.time())
+    buckets = ((token_hash("login:" + username), 10), ("service", 100))
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM login_limits WHERE expires_at <= ?", (now,))
+        for key, limit in buckets:
+            row = conn.execute("SELECT attempts FROM login_limits WHERE bucket = ?", (key,)).fetchone()
+            if row and row["attempts"] >= limit:
+                return False
+        for key, _ in buckets:
+            conn.execute("INSERT INTO login_limits VALUES (?, 1, ?) ON CONFLICT(bucket) DO UPDATE SET attempts = attempts + 1",
+                         (key, now + LOGIN_WINDOW_SECONDS))
+    return True
 
 
 def delete_expired_sessions() -> None:
@@ -193,19 +344,17 @@ def make_cookie(name: str, value: str, max_age: int | None = None) -> str:
     cookie[name]["samesite"] = "Strict"
     if max_age is not None:
         cookie[name]["max-age"] = str(max_age)
-    if os.environ.get("COOKIE_SECURE", "0") == "1":
+    if _AUTH_CONFIG.cookie_secure:
         cookie[name]["secure"] = True
     return cookie.output(header="").strip()
 
 
 def make_clear_cookie(name: str) -> str:
-    cookie = SimpleCookie()
-    cookie[name] = ""
-    cookie[name]["path"] = "/"
-    cookie[name]["httponly"] = True
-    cookie[name]["samesite"] = "Strict"
-    cookie[name]["max-age"] = "0"
-    return cookie.output(header="").strip()
+    return make_cookie(name, "", 0)
+
+
+# Equal-cost verification for unknown, legacy, or wrong-mode accounts.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 _MODEL = None
@@ -216,6 +365,9 @@ _SHAP = None
 def initialize_model() -> bool:
     global _MODEL, _METRICS, _SHAP
     _MODEL = _METRICS = _SHAP = None
+    if _AUTH_CONFIG.mode == "demo":
+        logging.warning("DEMO_MODE: heuristic only; private artifacts are disabled. Use fictitious inputs only.")
+        return False
     try:
         _MODEL, _METRICS, _SHAP = load_artifacts(
             normalize_features({}), Path(os.environ.get("ARTIFACT_DIR", str(ROOT / "artifacts")))
@@ -228,7 +380,7 @@ def initialize_model() -> bool:
 
 
 def load_model_bundle() -> dict[str, Any] | None:
-    return _MODEL
+    return _MODEL if _AUTH_CONFIG.mode == "restricted" else None
 
 
 def model_card_payload() -> dict[str, Any]:
@@ -240,11 +392,9 @@ def model_card_payload() -> dict[str, Any]:
         metrics = metrics or bundle.get("metrics")
         pipeline = bundle.get("pipeline")
         model_type = "Trained scikit-learn logistic regression pipeline"
-        if pipeline is not None:
-            try:
-                model_type = f"Trained {pipeline.named_steps['model'].__class__.__name__} pipeline"
-            except Exception:
-                pass
+        estimator = getattr(pipeline, "named_steps", {}).get("model")
+        if estimator is not None:
+            model_type = f"Trained {estimator.__class__.__name__} pipeline"
         return {
             "deployed_trained_model": True,
             "model_type": model_type,
@@ -253,7 +403,7 @@ def model_card_payload() -> dict[str, Any]:
             "metrics": metrics,
             "shap": shap_summary or {
                 "status": "not_available",
-                "message": "SHAP artifact is not deployed. Generate and publish artifacts/shap_summary.json after training on the final cohort.",
+                "message": "SHAP artifact is not deployed. Generate artifacts/shap_summary.json privately after training on the final cohort and deploy only an approved aggregate summary.",
             },
         }
 
@@ -272,7 +422,7 @@ def model_card_payload() -> dict[str, Any]:
             ],
             "shap": {
                 "status": "pending_trained_model",
-                "message": "No trained model artifact is deployed. Train on the MIMIC-IV Temporal Respiratory Support cohort, publish the model bundle, and add a SHAP summary artifact for formal explanations.",
+                "message": "No trained model artifact is deployed. Train on the MIMIC-IV Temporal Respiratory Support cohort, privately deploy the approved model bundle, and add an approved aggregate SHAP summary artifact for formal explanations.",
             },
         }
 
@@ -397,7 +547,12 @@ class CalculatorHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/ready":
-            self.send_json(HTTPStatus.OK if _MODEL is not None else HTTPStatus.SERVICE_UNAVAILABLE, {"model_ready": _MODEL is not None})
+            model_ready = load_model_bundle() is not None
+            demo_mode = _AUTH_CONFIG.mode == "demo"
+            self.send_json(HTTPStatus.OK if model_ready or demo_mode else HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"model_ready": model_ready, "demo_mode": demo_mode})
+        elif parsed.path == "/api/config":
+            self.send_json(HTTPStatus.OK, {"demo_mode": _AUTH_CONFIG.mode == "demo"})
         elif parsed.path == "/api/csrf":
             self.handle_csrf()
         elif parsed.path == "/api/me":
@@ -412,6 +567,14 @@ class CalculatorHandler(BaseHTTPRequestHandler):
         self.serve_static(parsed.path, include_body=False)
 
     def do_POST(self) -> None:
+        # JSON-only requests cannot be submitted by cross-origin HTML forms.
+        if self.headers.get_content_type() != "application/json":
+            self.send_json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "Use application/json."})
+            return
+        origin = self.headers.get("Origin")
+        if self.headers.get("Sec-Fetch-Site") == "cross-site" or (origin is not None and origin != _AUTH_CONFIG.origin):
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "Cross-origin request rejected."})
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/api/login":
             self.handle_login()
@@ -427,7 +590,8 @@ class CalculatorHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
 
     def log_message(self, format: str, *args: Any) -> None:
-        sys.stderr.write("%s - - [%s] %s\n" % (self.address_string(), self.log_date_time_string(), format % args))
+        # Never log request URLs/query strings, cookies, or bodies.
+        logging.info("HTTP request completed")
 
     def send_json(
         self,
@@ -450,18 +614,26 @@ class CalculatorHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Cache-Control", "no-store")
+        if _AUTH_CONFIG.cookie_secure:
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
-        if length > MAX_JSON_BYTES:
-            raise ValueError("Request body is too large.")
+        if length < 0 or length > MAX_JSON_BYTES or self.headers.get("Transfer-Encoding"):
+            raise ValueError("Invalid request body length.")
         raw = self.rfile.read(length)
-        return json.loads(raw.decode("utf-8") or "{}")
+        payload = json.loads(raw.decode("utf-8") or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("Expected a JSON object.")
+        return payload
 
     def get_cookie(self, name: str) -> str | None:
         raw = self.headers.get("Cookie", "")
-        cookie = SimpleCookie(raw)
+        try:
+            cookie = SimpleCookie(raw)
+        except CookieError:
+            return None
         if name not in cookie:
             return None
         return cookie[name].value
@@ -476,9 +648,9 @@ class CalculatorHandler(BaseHTTPRequestHandler):
                 SELECT sessions.*, users.username
                 FROM sessions
                 INNER JOIN users ON users.id = sessions.user_id
-                WHERE token_hash = ? AND expires_at > ?
+                WHERE token_hash = ? AND expires_at > ? AND users.account_type = ? AND users.password_policy = ?
                 """,
-                (token_hash(token), int(time.time())),
+                (token_hash(token), int(time.time()), _AUTH_CONFIG.mode, PASSWORD_POLICY_VERSION),
             ).fetchone()
         return row
 
@@ -521,19 +693,31 @@ class CalculatorHandler(BaseHTTPRequestHandler):
     def handle_login(self) -> None:
         try:
             payload = self.read_json()
-            username = str(payload.get("username", "")).strip()
-            password = str(payload.get("password", ""))
+            username = payload.get("username", "")
+            password = payload.get("password", "")
+            if not isinstance(username, str) or not isinstance(password, str) or len(username) > 128 or len(password) > 128:
+                raise ValueError("Invalid credential format.")
             if not username or not password:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Username and password are required."})
                 return
+            if not consume_login_attempt(username):
+                self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Too many sign-in attempts. Try again in five minutes."})
+                return
 
             with connect() as conn:
+                # Serialize with explicit password resets to avoid issuing a stale session.
+                conn.execute("BEGIN IMMEDIATE")
                 user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-                if not user or not verify_password(password, user["password_hash"]):
-                    time.sleep(0.35)
+                eligible = user is not None and user["account_type"] == _AUTH_CONFIG.mode and user["password_policy"] == PASSWORD_POLICY_VERSION
+                verified = verify_password(password, user["password_hash"] if eligible else _DUMMY_PASSWORD_HASH)
+                if not eligible or not verified:
                     self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Invalid username or password."})
                     return
 
+                old_token = self.get_cookie("session")
+                if old_token:
+                    conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash(old_token),))
+                conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (int(time.time()),))
                 raw_token = secrets.token_urlsafe(32)
                 csrf_token = secrets.token_urlsafe(32)
                 now = int(time.time())
@@ -589,7 +773,8 @@ class CalculatorHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         if not file_path.exists() or not file_path.is_file():
-            file_path = WEB_ROOT / "index.html"
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
 
         body = file_path.read_bytes()
         self.send_response(HTTPStatus.OK)
@@ -601,10 +786,9 @@ class CalculatorHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
 
-def serve(host: str, port: int) -> None:
+def serve(host: str, port: int, insecure_local_http: bool = False) -> None:
+    initialize_auth(host, port, insecure_local_http)
     initialize_model()
-    init_db()
-    seed_demo_user_from_env()
     delete_expired_sessions()
     server = ThreadingHTTPServer((host, port), CalculatorHandler)
     print(f"MIMIC IV Trauma Ventilation Risk Calculator Tool running at http://{host}:{port}")
@@ -617,10 +801,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_parser = subparsers.add_parser("serve", help="Start the local web server.")
     serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--insecure-local-http", action="store_true", help="Allow HTTP cookies only on 127.0.0.1 for local development.")
     serve_parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
 
-    user_parser = subparsers.add_parser("create-user", help="Create a calculator user.")
-    user_parser.add_argument("--username", required=True)
+    for command in ("create-user", "reset-user"):
+        user_parser = subparsers.add_parser(command, help="Create or explicitly reset a calculator account.")
+        user_parser.add_argument("--username", required=True)
+        user_parser.add_argument("--account-type", choices=("restricted", "demo"), default="restricted")
 
     return parser
 
@@ -628,15 +815,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.command == "create-user":
+    if args.command in {"create-user", "reset-user"}:
         password = getpass.getpass("Password: ")
         confirm = getpass.getpass("Confirm password: ")
         if password != confirm:
             raise SystemExit("Passwords do not match.")
-        create_user(args.username, password)
-        print(f"Created user: {args.username}")
+        operation = create_user if args.command == "create-user" else reset_user
+        operation(args.username, password, args.account_type)
+        print("Account saved; distribute credentials through an approved private channel.")
     elif args.command == "serve":
-        serve(args.host, args.port)
+        try:
+            serve(args.host, args.port, args.insecure_local_http)
+        except (AuthConfigurationError, ValueError) as exc:
+            raise SystemExit(f"AUTH_CONFIGURATION_ERROR: {exc}") from None
 
 
 if __name__ == "__main__":

@@ -12,7 +12,11 @@ services:
         value: "1"
       - key: ALLOW_HEURISTIC_FALLBACK
         value: "0"
-      - key: MIMIC_DEMO_USERNAME
-        value: mayo_tcgs_demo
-      - key: MIMIC_DEMO_PASSWORD
-        value: mayo_1234
+      - key: MIMIC_AUTH_MODE
+        value: restricted
+      - key: PUBLIC_ORIGIN
+        sync: false
+      - key: MIMIC_BOOTSTRAP_USERNAME
+        sync: false
+      - key: MIMIC_BOOTSTRAP_PASSWORD
+        sync: false
